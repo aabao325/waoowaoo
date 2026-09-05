@@ -295,7 +295,11 @@ describe('Temporal Task terminal and follow-up durability', () => {
     let queuedCancelWorker: TaskQueuedCancelWorkerHarness | null = null
     let schedulerHandle: WorkflowHandle | null = null
     let firstHandle: WorkflowHandle | null = null
+    const originalVideoConcurrency = process.env.DEFAULT_WORKFLOW_CONCURRENCY_VIDEO
     try {
+      // Self-hosted concurrency is deployment-owned, so a user preference alone
+      // cannot hold this second Task in the real Scheduler queue.
+      process.env.DEFAULT_WORKFLOW_CONCURRENCY_VIDEO = '1'
       queuedCancelWorker = await startTaskQueuedCancelWorker({
         capacityHolderTaskId: fixture.firstTaskId,
       })
@@ -365,6 +369,8 @@ describe('Temporal Task terminal and follow-up durability', () => {
         connected.client.workflow.getHandle(secondWorkflowId).describe(),
       ).rejects.toThrow()
     } finally {
+      if (originalVideoConcurrency === undefined) delete process.env.DEFAULT_WORKFLOW_CONCURRENCY_VIDEO
+      else process.env.DEFAULT_WORKFLOW_CONCURRENCY_VIDEO = originalVideoConcurrency
       queuedCancelWorker?.releaseCapacityHolder()
       await terminateQuietly(firstHandle, 'TASK_QUEUED_CANCEL_CAPACITY_HOLDER_TEST_COMPLETE')
       await terminateQuietly(schedulerHandle, 'TASK_QUEUED_CANCEL_SCHEDULER_TEST_COMPLETE')

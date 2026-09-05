@@ -11,6 +11,7 @@ import {
   reserveWorkspaceResourceInTransaction,
 } from '@/lib/workspace-resource/persistence'
 import { WORKSPACE_RESOURCE_SCHEMA } from '@/lib/workspace-resource/schema-registry'
+import { VIDEO_MERGE_FPS } from '@/lib/workspace-resource/video-merge-contract'
 import { buildWorkspaceResourceLifecycleProjection } from '@/lib/workspace-resource/task-runtime-envelope'
 import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import { submitOperationTaskBatch } from '@/lib/operations/submit-operation-task'
@@ -172,6 +173,17 @@ async function submitFixtureTask(input: {
               inputHash: 'b'.repeat(64),
               inputs: input.references,
               generationOptions: { mergeMode: 'ordered_concat' },
+              edit: {
+                clips: input.references.filter((reference) => reference.role === 'source_video').map((reference) => ({
+                  inputPosition: reference.position,
+                  startFrame: 0,
+                  frameCount: VIDEO_MERGE_FPS,
+                })),
+                width: 480,
+                height: 480,
+                aspectRatio: '1:1',
+                audioMode: 'mute',
+              },
               musicCues: [],
               toolCallId: null,
             },

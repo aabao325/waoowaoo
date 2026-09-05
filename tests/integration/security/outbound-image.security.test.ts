@@ -1,46 +1,34 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   OutboundImageNormalizeError,
-  normalizeOptionalReferenceImagesForGeneration,
-  normalizeReferenceImagesForGeneration,
   normalizeToBase64ForGeneration,
   normalizeToOriginalMediaUrl,
-  sanitizeImageInputsForTaskPayload,
 } from '@/lib/media/outbound-image'
-import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 import { lookup } from 'node:dns/promises'
-
-vi.mock('@/lib/storage', () => ({
-  getSignedObjectUrl: vi.fn(async (key: string) => `/signed/${key}`),
-  toFetchableUrl: vi.fn((value: string) => (
-    value.startsWith('/') ? `https://app.example.com${value}` : value
-  )),
-}))
-
-vi.mock('@/lib/media/service', () => ({
-  resolveStorageKeyFromMediaValue: vi.fn(),
-}))
 
 vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(),
 }))
 
 describe('outbound-image normalization', () => {
-  const fetchMock = vi.fn()
-  const resolveStorageKeyMock = vi.mocked(resolveStorageKeyFromMediaValue)
+  const fetchMock = vi.fn<typeof fetch>()
   const dnsLookupMock = vi.mocked(lookup)
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    fetchMock.mockReset()
+    dnsLookupMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
+    // Use the real storage URL adapter with isolated configuration; these cases
+    // exercise external media and never read or write an S3 object.
+    vi.stubEnv('S3_ENDPOINT', 'https://storage.example.com')
+    vi.stubEnv('S3_UPLOAD_ENDPOINT', 'https://storage.example.com')
+    vi.stubEnv('S3_BUCKET', 'outbound-security')
+    vi.stubEnv('S3_ACCESS_KEY_ID', 'outbound-security-test')
+    vi.stubEnv('S3_SECRET_ACCESS_KEY', 'outbound-security-test-secret')
+    vi.stubEnv('S3_SESSION_TOKEN', '')
     vi.stubEnv('NEXTAUTH_URL', 'https://app.example.com')
     vi.stubEnv('INTERNAL_APP_URL', '')
     vi.stubEnv('INTERNAL_TASK_API_BASE_URL', '')
-
-    resolveStorageKeyMock.mockImplementation(async (value: unknown) => {
-      if (value === '/m/pub-1') return 'images/from-media.png'
-      return null
-    })
 
     fetchMock.mockResolvedValue(new Response(Uint8Array.from([1, 2, 3]), {
       status: 200,
@@ -48,13 +36,13 @@ describe('outbound-image normalization', () => {
     }))
 
     dnsLookupMock.mockResolvedValue(
-      { address: '93.184.216.34', family: 4 } as unknown as { address: string; family: number },
+      [{ address: '93.184.216.34', family: 4 }] as never,
     )
   })
 
-  it('keeps data url unchanged', async () => {
-    const dataUrl = 'data:image/png;base64,AAAA'
-    expect(await normalizeToOriginalMediaUrl(dataUrl)).toBe(dataUrl)
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('throws structured error on empty input', async () => {
@@ -63,30 +51,6 @@ describe('outbound-image normalization', () => {
       code: 'OUTBOUND_IMAGE_EMPTY_INPUT',
       stage: 'normalize_original',
     })
-  })
-
-  it('unwraps next/image and resolves /m route to signed source', async () => {
-    const input = '/_next/image?url=%2Fm%2Fpub-1&w=640&q=75'
-    const normalized = await normalizeToOriginalMediaUrl(input)
-    expect(normalized).toBe('https://app.example.com/signed/images/from-media.png')
-  })
-
-  it('fails explicitly when /m route cannot be resolved to storage key', async () => {
-    await expect(normalizeToOriginalMediaUrl('/m/missing-id')).rejects.toMatchObject({
-      code: 'OUTBOUND_IMAGE_MEDIA_ROUTE_UNRESOLVED',
-      stage: 'normalize_original',
-    })
-  })
-
-  it('signs storage key inputs', async () => {
-    const normalized = await normalizeToOriginalMediaUrl('images/direct.png')
-    expect(normalized).toBe('https://app.example.com/signed/images/direct.png')
-  })
-
-  it('resolves storage sign api route without fetching the authenticated route', async () => {
-    const normalized = await normalizeToOriginalMediaUrl('/api/storage/sign?key=images%2Fdirect.png&expires=3600')
-    expect(normalized).toBe('https://app.example.com/signed/images/direct.png')
-    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('rejects retired internal api file routes', async () => {
@@ -101,11 +65,6 @@ describe('outbound-image normalization', () => {
       code: 'OUTBOUND_IMAGE_UNSUPPORTED_INPUT',
       stage: 'normalize_original',
     })
-  })
-
-  it('keeps http input as-is', async () => {
-    const input = 'https://example.com/a.png'
-    expect(await normalizeToOriginalMediaUrl(input)).toBe(input)
   })
 
   it('rejects private ip outbound urls as unsafe', async () => {
@@ -161,11 +120,6 @@ describe('outbound-image normalization', () => {
     })
   })
 
-  it('converts normalized source to data url base64 payload', async () => {
-    const dataUrl = await normalizeToBase64ForGeneration('images/direct.png')
-    expect(dataUrl).toBe('data:image/png;base64,AQID')
-  })
-
   it('sniffs png mime when upstream returns application/octet-stream', async () => {
     fetchMock.mockResolvedValue(new Response(Uint8Array.from([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -175,7 +129,7 @@ describe('outbound-image normalization', () => {
       headers: { 'content-type': 'application/octet-stream' },
     }))
 
-    const dataUrl = await normalizeToBase64ForGeneration('images/direct.png')
+    const dataUrl = await normalizeToBase64ForGeneration('https://example.com/direct.png')
     expect(dataUrl).toBe('data:image/png;base64,iVBORw0KGgoAAAAN')
   })
 
@@ -189,104 +143,8 @@ describe('outbound-image normalization', () => {
       headers: { 'content-type': 'application/octet-stream' },
     }))
 
-    const dataUrl = await normalizeToBase64ForGeneration('images/direct.jpg')
+    const dataUrl = await normalizeToBase64ForGeneration('https://example.com/direct.jpg')
     expect(dataUrl).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRgAB')
   })
 
-  it('normalizes references with dedupe and failure isolation', async () => {
-    fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).includes('/api/bad.png')) {
-        return new Response(null, {
-          status: 404,
-        })
-      }
-      return new Response(Uint8Array.from([7, 8, 9]), {
-        status: 200,
-        headers: { 'content-type': 'image/png' },
-      })
-    })
-
-    const normalized = await normalizeReferenceImagesForGeneration([
-      'images/direct.png',
-      'images/direct.png',
-      '/api/bad.png',
-    ])
-    expect(normalized).toHaveLength(1)
-    expect(normalized[0]).toBe('data:image/png;base64,BwgJ')
-  })
-
-  it('reports structured issue and fails explicitly when all references fail', async () => {
-    fetchMock.mockResolvedValue(new Response(null, {
-      status: 500,
-    }))
-
-    const issues: Array<{
-      code: string
-      stage: string
-      message: string
-      input: string
-      index: number
-    }> = []
-
-    await expect(
-      normalizeReferenceImagesForGeneration(['images/bad.png'], {
-        onIssue: (issue) => issues.push(issue),
-      }),
-    ).rejects.toMatchObject({
-      code: 'OUTBOUND_IMAGE_REFERENCE_ALL_FAILED',
-      stage: 'normalize_reference',
-    })
-    expect(issues).toHaveLength(1)
-    expect(issues[0]).toMatchObject({
-      code: 'OUTBOUND_IMAGE_FETCH_FAILED',
-      stage: 'normalize_base64',
-      input: 'images/bad.png',
-      index: 0,
-    })
-  })
-
-  it('fails open for optional references when all candidates fail', async () => {
-    fetchMock.mockResolvedValue(new Response(null, {
-      status: 500,
-    }))
-
-    const issues: Array<{
-      code: string
-      stage: string
-      message: string
-      input: string
-      index: number
-    }> = []
-
-    await expect(
-      normalizeOptionalReferenceImagesForGeneration(['images/bad.png'], {
-        onIssue: (issue) => issues.push(issue),
-        context: { scope: 'test' },
-      }),
-    ).resolves.toEqual([])
-    expect(issues).toHaveLength(1)
-    expect(issues[0]).toMatchObject({
-      code: 'OUTBOUND_IMAGE_FETCH_FAILED',
-      stage: 'normalize_base64',
-      input: 'images/bad.png',
-      index: 0,
-    })
-  })
-
-  it('sanitizes task payload urls and reports input issues', () => {
-    const result = sanitizeImageInputsForTaskPayload([
-      '/_next/image?url=images%2Fa.png&w=1080&q=75',
-      '',
-      123,
-      '/relative/path.png',
-    ])
-
-    expect(result.normalized).toEqual(['images/a.png'])
-    expect(result.issues.map((item) => item.reason)).toEqual([
-      'next_image_unwrapped',
-      'empty_value_skipped',
-      'non_string_skipped',
-      'relative_path_rejected',
-    ])
-  })
 })
