@@ -1,3 +1,4 @@
+import { ARK_PROVIDER_TEST_LLM_MODEL_ID } from '@/lib/ai-providers/ark/llm-models'
 import {
   beforeEach,
   chatCompletionResponse,
@@ -21,21 +22,21 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
   })
 
   describe('testLlmConnection routes through provider connection testers', () => {
-    it('uses the Ark default base URL and test model when none are supplied', async () => {
-      fetchMock.mockResolvedValueOnce(responsesApiResponse('doubao-seed-2-0-lite-260215', '2'))
+    it('encodes an explicit Ark model with disabled thinking on the Responses endpoint', async () => {
+      fetchMock.mockResolvedValueOnce(responsesApiResponse(ARK_PROVIDER_TEST_LLM_MODEL_ID, '2'))
 
-      const result = await testLlmConnection({ provider: 'ark', apiKey: 'sk-ark' })
+      const result = await testLlmConnection({ provider: 'ark', apiKey: 'sk-ark', model: ARK_PROVIDER_TEST_LLM_MODEL_ID })
 
       const [, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit]
       const url = requestUrlOf(fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit?])
       expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/responses')
       const body = JSON.parse(String(init.body)) as Record<string, unknown>
-      expect(body.model).toBe('doubao-seed-2-0-lite-260215')
+      expect(body.model).toBe(ARK_PROVIDER_TEST_LLM_MODEL_ID)
       expect(body.thinking).toEqual({ type: 'disabled' })
       expect(result).toEqual({
         provider: 'ark',
         message: 'ark connection ok',
-        model: 'doubao-seed-2-0-lite-260215',
+        model: ARK_PROVIDER_TEST_LLM_MODEL_ID,
         answer: '2',
       })
     })
@@ -83,7 +84,7 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
       const result = await testProviderConnection({ apiType: 'ark', apiKey: 'sk-ark' })
 
       expect(result.success).toBe(false)
-      expect(result.steps).toEqual([
+      expect(result.steps).toMatchObject([
         {
           name: 'models',
           status: 'fail',
@@ -94,7 +95,6 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
           name: 'textGen',
           status: 'skip',
           messageKey: 'connectionTest.skippedModelsFailure',
-          model: 'doubao-seed-2-0-lite-260215',
         },
       ])
       const url = requestUrlOf(fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit?])

@@ -1,6 +1,10 @@
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 const fetchMock = vi.hoisted(() => vi.fn<typeof fetch>())
+
+// A preflight rejection may leave a queued wire response unconsumed.
+// Clear implementations as well as call history before the next protocol case.
+beforeEach(() => fetchMock.mockReset())
 
 vi.mock('@/lib/http/outbound-proxy', () => ({
   fetchWithProviderProxy: fetchMock,

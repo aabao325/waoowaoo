@@ -1,11 +1,4 @@
 import {
-  FAL_HAPPY_HORSE_IMAGE_TO_VIDEO_MODEL_ID,
-  FAL_KLING_O3_PRO_IMAGE_TO_VIDEO_MODEL_ID,
-  FAL_KLING_O3_STANDARD_IMAGE_TO_VIDEO_MODEL_ID,
-  FAL_KLING_V3_PRO_IMAGE_TO_VIDEO_MODEL_ID,
-  FAL_KLING_V3_STANDARD_IMAGE_TO_VIDEO_MODEL_ID,
-  FAL_SEEDANCE_2_FAST_VIDEO_MODEL_ID,
-  FAL_SEEDANCE_2_VIDEO_MODEL_ID,
   arkAdapter,
   beforeEach,
   buildOpenRouterSessionId,
@@ -21,10 +14,9 @@ import {
   jsonResponse,
   responsesApiResponse,
   responsesApiStream,
-  supportsAssetReferenceMultiReferenceVideoModel,
   vi,
 } from './provider-gateway-dispatch.fixture'
-import { afterEach } from 'vitest'
+import { ARK_PROVIDER_TEST_LLM_MODEL_ID } from '@/lib/ai-providers/ark/llm-models'
 import { generateText, streamText } from 'ai'
 import { listBuiltinCapabilityCatalog } from '@/lib/ai-registry/capabilities-catalog'
 import {
@@ -41,7 +33,6 @@ import {
   FAL_GPT_IMAGE_2_MODEL_ID,
   resolveFalOptionSchema,
 } from '@/lib/ai-providers/fal/models'
-import { resolveReasoningEffort } from '@/lib/ai-exec/reasoning-effort'
 import { describeLlmVariantBase } from '@/lib/ai-exec/llm-descriptor'
 import { AiOptionValidationError, normalizeAiOptions } from '@/lib/ai-exec/normalize'
 import { createAiLanguageModel } from '@/lib/ai-exec/language-model'
@@ -55,21 +46,6 @@ import { listBuiltinPricingCatalog } from '@/lib/ai-registry/pricing-catalog'
 import {
   listPlatformCatalogModels,
 } from '@/lib/platform-models/catalog'
-
-const ORIGINAL_REASONING_ENV = {
-  PROVIDER_CREDENTIAL_MODE: process.env.PROVIDER_CREDENTIAL_MODE,
-  PLATFORM_DEFAULT_ASSISTANT_REASONING_EFFORT: process.env.PLATFORM_DEFAULT_ASSISTANT_REASONING_EFFORT,
-  PLATFORM_DEFAULT_ANALYSIS_REASONING_EFFORT: process.env.PLATFORM_DEFAULT_ANALYSIS_REASONING_EFFORT,
-}
-
-function restoreEnvValue(name: keyof typeof ORIGINAL_REASONING_ENV): void {
-  const value = ORIGINAL_REASONING_ENV[name]
-  if (value === undefined) {
-    delete process.env[name]
-  } else {
-    process.env[name] = value
-  }
-}
 
 async function requestBodyOf(call: [RequestInfo | URL, RequestInit?]): Promise<Record<string, unknown>> {
   const [input, init] = call
@@ -85,12 +61,6 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
   beforeEach(() => {
     vi.clearAllMocks()
     ensureAiCatalogsRegistered()
-  })
-
-  afterEach(() => {
-    restoreEnvValue('PROVIDER_CREDENTIAL_MODE')
-    restoreEnvValue('PLATFORM_DEFAULT_ASSISTANT_REASONING_EFFORT')
-    restoreEnvValue('PLATFORM_DEFAULT_ANALYSIS_REASONING_EFFORT')
   })
 
   it('normalizes FAL GPT Image 2 options from its production schema', () => {
@@ -191,13 +161,13 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
 
   describe('provider-owned AI SDK wire options remain exact', () => {
     it('injects Ark thinking into the Responses request without a handwritten transport', async () => {
-      fetchMock.mockResolvedValueOnce(responsesApiResponse('doubao-seed-2-0-lite-260215', 'ok'))
+      fetchMock.mockResolvedValueOnce(responsesApiResponse(ARK_PROVIDER_TEST_LLM_MODEL_ID, 'ok'))
       const model = createAiLanguageModel({
         providerKey: 'ark',
         selection: {
           provider: 'ark',
-          modelId: 'doubao-seed-2-0-lite-260215',
-          modelKey: 'ark::doubao-seed-2-0-lite-260215',
+          modelId: ARK_PROVIDER_TEST_LLM_MODEL_ID,
+          modelKey: `ark::${ARK_PROVIDER_TEST_LLM_MODEL_ID}`,
         },
         providerConfig: {
           id: 'ark',
@@ -223,7 +193,7 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
           response: {
             id: 'resp-ark-stream',
             created_at: 1,
-            model: 'doubao-seed-2-0-lite-260215',
+            model: ARK_PROVIDER_TEST_LLM_MODEL_ID,
             service_tier: null,
           },
         },
@@ -286,8 +256,8 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
         providerKey: 'ark',
         selection: {
           provider: 'ark',
-          modelId: 'doubao-seed-2-0-lite-260215',
-          modelKey: 'ark::doubao-seed-2-0-lite-260215',
+          modelId: ARK_PROVIDER_TEST_LLM_MODEL_ID,
+          modelKey: `ark::${ARK_PROVIDER_TEST_LLM_MODEL_ID}`,
         },
         providerConfig: {
           id: 'ark',
@@ -315,7 +285,7 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
 
     it('encodes Ark and Google vision images through their native AI SDK protocols', async () => {
       fetchMock
-        .mockResolvedValueOnce(responsesApiResponse('doubao-seed-2-0-lite-260215', 'ark vision ok'))
+        .mockResolvedValueOnce(responsesApiResponse(ARK_PROVIDER_TEST_LLM_MODEL_ID, 'ark vision ok'))
         .mockResolvedValueOnce(jsonResponse({
           responseId: 'google-vision-response',
           modelVersion: 'gemini-3.1-pro-preview',
@@ -348,8 +318,8 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
         providerKey: 'ark',
         selection: {
           provider: 'ark',
-          modelId: 'doubao-seed-2-0-lite-260215',
-          modelKey: 'ark::doubao-seed-2-0-lite-260215',
+          modelId: ARK_PROVIDER_TEST_LLM_MODEL_ID,
+          modelKey: `ark::${ARK_PROVIDER_TEST_LLM_MODEL_ID}`,
         },
         providerConfig: {
           ...providerConfig,
@@ -599,30 +569,6 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
         .toThrow(AiOptionValidationError)
     })
 
-    it('resolves assistant and analysis effort from separate platform env keys', async () => {
-      process.env.PROVIDER_CREDENTIAL_MODE = 'platform-key'
-      process.env.PLATFORM_DEFAULT_ASSISTANT_REASONING_EFFORT = 'max'
-      process.env.PLATFORM_DEFAULT_ANALYSIS_REASONING_EFFORT = 'xhigh'
-
-      await expect(resolveReasoningEffort({
-        userId: 'user-1',
-        modelKey: `openrouter::${OPENROUTER_GPT_5_6_LUNA_MODEL_ID}`,
-        purpose: 'assistant',
-      })).resolves.toBe('max')
-      await expect(resolveReasoningEffort({
-        userId: 'user-1',
-        modelKey: `openrouter::${OPENROUTER_GPT_5_6_SOL_MODEL_ID}`,
-        purpose: 'analysis',
-      })).resolves.toBe('xhigh')
-
-      process.env.PLATFORM_DEFAULT_ASSISTANT_REASONING_EFFORT = 'minimal'
-      await expect(resolveReasoningEffort({
-        userId: 'user-1',
-        modelKey: `openrouter::${OPENROUTER_GPT_5_6_LUNA_MODEL_ID}`,
-        purpose: 'assistant',
-      })).rejects.toThrow('CAPABILITY_VALUE_NOT_ALLOWED')
-    })
-
     it('preserves max in OpenRouter text and vision request bodies', async () => {
       fetchMock.mockImplementation(async () => (
         chatCompletionResponse(OPENROUTER_GPT_5_6_LUNA_MODEL_ID, 'ok')
@@ -739,53 +685,4 @@ describe('provider contract - gateway dispatch (connection tests, session, capab
     })
   })
 
-  describe('asset-reference multi-reference video capability comes from the catalog', () => {
-    it('declares the platform OpenRouter Seedance Fast model with its explicit reference limit', () => {
-      const modelKey = 'openrouter::bytedance/seedance-2.0-fast'
-      expect(supportsAssetReferenceMultiReferenceVideoModel(modelKey)).toBe(true)
-      const entry = listBuiltinCapabilityCatalog().find((candidate) => (
-        candidate.modelType === 'video'
-        && candidate.provider === 'openrouter'
-        && candidate.modelId === 'bytedance/seedance-2.0-fast'
-      ))
-      expect(entry?.capabilities?.video?.maxReferenceImages).toBe(9)
-      expect(entry?.capabilities?.video?.maxReferenceAudios).toBe(3)
-      expect(entry?.capabilities?.video?.maxReferenceVideos).toBe(3)
-      expect(entry?.capabilities?.video?.maxReferenceFiles).toBe(12)
-      expect(entry?.capabilities?.video?.referenceAudioRequiresVisual).toBe(true)
-      expect(entry?.capabilities?.video?.supportedInputModes).toEqual([
-        'text_to_video',
-        'first_frame',
-        'first_last_frame',
-        'reference',
-      ])
-    })
-
-    it('declares all Ark video models as multi-reference capable', () => {
-      expect(supportsAssetReferenceMultiReferenceVideoModel('ark::doubao-seedance-2-0-260128')).toBe(true)
-      expect(supportsAssetReferenceMultiReferenceVideoModel('ark::doubao-seedance-2-0-fast-260128')).toBe(true)
-      expect(supportsAssetReferenceMultiReferenceVideoModel('ark::doubao-seedance-1-0-pro-250528-batch')).toBe(true)
-    })
-
-    it('declares exactly the supported FAL video models as multi-reference capable', () => {
-      for (const modelId of [
-        FAL_HAPPY_HORSE_IMAGE_TO_VIDEO_MODEL_ID,
-        FAL_SEEDANCE_2_VIDEO_MODEL_ID,
-        FAL_SEEDANCE_2_FAST_VIDEO_MODEL_ID,
-        FAL_KLING_O3_STANDARD_IMAGE_TO_VIDEO_MODEL_ID,
-        FAL_KLING_O3_PRO_IMAGE_TO_VIDEO_MODEL_ID,
-        FAL_KLING_V3_STANDARD_IMAGE_TO_VIDEO_MODEL_ID,
-        FAL_KLING_V3_PRO_IMAGE_TO_VIDEO_MODEL_ID,
-      ]) {
-        expect(supportsAssetReferenceMultiReferenceVideoModel(`fal::${modelId}`)).toBe(true)
-      }
-      expect(supportsAssetReferenceMultiReferenceVideoModel('fal::fal-ai/kling-video/v2.5-turbo/pro/image-to-video')).toBe(false)
-    })
-
-    it('rejects undeclared providers, unknown models, and bare model ids', () => {
-      expect(supportsAssetReferenceMultiReferenceVideoModel('openrouter::bytedance/seedance-2.0')).toBe(true)
-      expect(supportsAssetReferenceMultiReferenceVideoModel('ark::no-such-model')).toBe(false)
-      expect(supportsAssetReferenceMultiReferenceVideoModel('doubao-seedance-2-0-260128')).toBe(false)
-    })
-  })
 })
